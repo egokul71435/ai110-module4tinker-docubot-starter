@@ -64,7 +64,21 @@ class DocuBot:
         ignore punctuation if needed.
         """
         index = {}
-        # TODO: implement simple indexing
+
+        # new
+        
+        for filename, text in documents:
+            # Split text into words, lowercase them, and add to index
+            tokens = text.lower().split()
+            for token in tokens:
+                # Remove common punctuation from the end of tokens
+                token = token.rstrip('.,!?;:')
+                if token:  # Skip empty tokens
+                    if token not in index:
+                        index[token] = []
+                    # Add filename if not already in the list
+                    if filename not in index[token]:
+                        index[token].append(filename)
         return index
 
     # -----------------------------------------------------------
@@ -81,8 +95,20 @@ class DocuBot:
         - Count how many appear in the text
         - Return the count as the score
         """
-        # TODO: implement scoring
-        return 0
+
+        # new
+
+        # Convert query to lowercase words
+        query_words = query.lower().split()
+        text_lower = text.lower()
+        
+        # Count how many query words appear in the text
+        score = 0
+        for word in query_words:
+            # Count occurrences of the word in the text
+            score += text_lower.count(word)
+        
+        return score
 
     def retrieve(self, query, top_k=3):
         """
@@ -91,8 +117,22 @@ class DocuBot:
 
         Return a list of (filename, text) sorted by score descending.
         """
-        results = []
-        # TODO: implement retrieval logic
+        
+        # new
+
+        # Score each document using the query
+        scored_docs = []
+        for filename, text in self.documents:
+            score = self.score_document(query, text)
+            # Only include documents with non-zero score
+            if score > 0:
+                scored_docs.append((score, filename, text))
+        
+        # Sort by score in descending order
+        scored_docs.sort(key=lambda x: x[0], reverse=True)
+        
+        # Return top-k documents as (filename, text) tuples
+        results = [(filename, text) for score, filename, text in scored_docs]
         return results[:top_k]
 
     # -----------------------------------------------------------

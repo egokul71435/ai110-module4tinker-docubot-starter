@@ -22,6 +22,9 @@ class DocuBot:
         # Load documents into memory
         self.documents = self.load_documents()  # List of (filename, text)
 
+        # Build chunks for better retrieval (split documents into paragraphs)
+        self.chunks = self.build_chunks(self.documents)
+
         # Build a retrieval index (implemented in Phase 1)
         self.index = self.build_index(self.documents)
 
@@ -43,6 +46,40 @@ class DocuBot:
                 filename = os.path.basename(path)
                 docs.append((filename, text))
         return docs
+
+    def chunk_text(self, text, min_length=50):
+        """
+        Split text into paragraphs (chunks separated by double newlines).
+        Useful for granular retrieval.
+        Returns a list of non-empty text chunks.
+        """
+        # Split by double newlines (blank lines)
+        paragraphs = text.split("\n\n")
+        
+        # Filter out empty or very short chunks
+        chunks = [p.strip() for p in paragraphs if p.strip() and len(p.strip()) >= min_length]
+        
+        # If no chunks after filtering, fall back to splitting by single newlines
+        if not chunks:
+            chunks = [p.strip() for p in text.split("\n") if p.strip() and len(p.strip()) >= min_length]
+        
+        # If still no chunks, return the whole text as one chunk
+        if not chunks:
+            chunks = [text.strip()]
+        
+        return chunks
+
+    def build_chunks(self, documents):
+        """
+        Convert documents into smaller chunks for retrieval.
+        Returns a list of tuples: (filename, chunk_text)
+        """
+        all_chunks = []
+        for filename, text in documents:
+            chunks = self.chunk_text(text)
+            for chunk in chunks:
+                all_chunks.append((filename, chunk))
+        return all_chunks
 
     # -----------------------------------------------------------
     # Index Construction (Phase 1)
@@ -112,42 +149,78 @@ class DocuBot:
 
     def retrieve(self, query, top_k=3):
         """
-        TODO (Phase 1):
-        Use the index and scoring function to select top_k relevant document snippets.
-
-        Return a list of (filename, text) sorted by score descending.
+        Retrieve top_k relevant chunks using scoring.
+        Returns a list of (filename, chunk_text) sorted by relevance score.
         """
-        
-        # new
-
-        # Score each document using the query
-        scored_docs = []
-        for filename, text in self.documents:
-            score = self.score_document(query, text)
-            # Only include documents with non-zero score
+        # Score each chunk using the query
+        scored_chunks = []
+        for filename, chunk_text in self.chunks:
+            score = self.score_document(query, chunk_text)
+            # Only include chunks with non-zero score
             if score > 0:
-                scored_docs.append((score, filename, text))
+                scored_chunks.append((score, filename, chunk_text))
         
         # Sort by score in descending order
-        scored_docs.sort(key=lambda x: x[0], reverse=True)
+        scored_chunks.sort(key=lambda x: x[0], reverse=True)
         
-        # Return top-k documents as (filename, text) tuples
-        results = [(filename, text) for score, filename, text in scored_docs]
+        # Return top-k chunks as (filename, text) tuples
+        results = [(filename, chunk_text) for score, filename, chunk_text in scored_chunks]
         return results[:top_k]
+
+    def has_sufficient_evidence(self, query, top_k=3, min_score=1):
+        """
+        Guardrail: Check if retrieved results contain meaningful evidence.
+        
+        A score below min_score indicates no relevant match at all.
+        This prevents answering with completely unrelated context.
+        
+        Args:
+            query: User query string
+            top_k: Number of chunks to consider
+            min_score: Minimum relevance score required (default=1)
+                     A score of 1 means at least one query word matched,
+                     indicating some relevance to the question.
+        
+        Returns:
+            (bool, int): (has_sufficient_evidence, top_chunk_score)
+        """
+        scored_chunks = []
+        for filename, chunk_text in self.chunks:
+            score = self.score_document(query, chunk_text)
+            if score > 0:
+                scored_chunks.append((score, filename, chunk_text))
+        
+        # If no chunks scored, we have no evidence
+        if not scored_chunks:
+            return False, 0
+        
+        # Sort by score to get the highest-scoring chunk
+        scored_chunks.sort(key=lambda x: x[0], reverse=True)
+        
+        # Check if the highest-scoring chunk meets the threshold
+        top_score = scored_chunks[0][0]
+        has_evidence = top_score >= min_score
+        
+        return has_evidence, top_score
 
     # -----------------------------------------------------------
     # Answering Modes
     # -----------------------------------------------------------
 
-    def answer_retrieval_only(self, query, top_k=3):
+    def answer_retrieval_only(self, query, top_k=3, min_score=1):
         """
         Phase 1 retrieval only mode.
         Returns raw snippets and filenames with no LLM involved.
+        
+        Includes guardrail: refuses to answer if no relevant docs found.
         """
+        # Check for sufficient evidence before answering
+        has_evidence, top_score = self.has_sufficient_evidence(query, top_k=top_k, min_score=min_score)
+        
+        if not has_evidence:
+            return "I don't have relevant information in the documentation to answer this question."
+        
         snippets = self.retrieve(query, top_k=top_k)
-
-        if not snippets:
-            return "I do not know based on these docs."
 
         formatted = []
         for filename, text in snippets:
@@ -155,22 +228,26 @@ class DocuBot:
 
         return "\n---\n".join(formatted)
 
-    def answer_rag(self, query, top_k=3):
+    def answer_rag(self, query, top_k=3, min_score=1):
         """
         Phase 2 RAG mode.
         Uses student retrieval to select snippets, then asks Gemini
         to generate an answer using only those snippets.
+        
+        Includes guardrail: refuses to answer if no relevant docs found.
         """
         if self.llm_client is None:
             raise RuntimeError(
                 "RAG mode requires an LLM client. Provide a GeminiClient instance."
             )
 
+        # Check for sufficient evidence before asking LLM
+        has_evidence, top_score = self.has_sufficient_evidence(query, top_k=top_k, min_score=min_score)
+        
+        if not has_evidence:
+            return "I don't have relevant information in the documentation to answer this question."
+
         snippets = self.retrieve(query, top_k=top_k)
-
-        if not snippets:
-            return "I do not know based on these docs."
-
         return self.llm_client.answer_from_snippets(query, snippets)
 
     # -----------------------------------------------------------

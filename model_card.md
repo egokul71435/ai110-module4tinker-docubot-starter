@@ -136,11 +136,12 @@ You can reuse or adapt the queries from `dataset.py`.
 
 **Guardrails Implemented**
 
-1. **`has_sufficient_evidence(query, min_score=1)` method**
-   - Checks if the top-scoring chunk from `retrieve()` has a relevance score >= `min_score` threshold (default: 1, meaning at least one query word must match).
+1. **`has_sufficient_evidence(query, top_k=3, min_score=1)` method**
+   - Scores every chunk, then restricts consideration to the top `top_k` scoring chunks (the same set `retrieve()` would return) and checks whether the best of those has a relevance score >= `min_score` threshold (default: 1, meaning at least one query word must match).
    - Returns a tuple: `(bool, int)` indicating sufficiency and the actual top score.
    - Used before answering in both `answer_retrieval_only()` and `answer_rag()` modes.
    - Behavior: If score < threshold, immediately return refusal message instead of attempting an answer.
+   - **Fixed**: `top_k` was previously accepted but unused, so the evidence check silently scanned the entire chunk pool instead of the top-k window described in its docstring. It's now applied before the threshold check, so the guardrail's behavior matches its documented contract.
    - **Example**: Query "blockchain interface" with 0 matching chunks → score = 0 → guardrail blocks answer.
 
 2. **Paragraph-based chunking** (via `chunk_text()`)

@@ -80,3 +80,11 @@ You will primarily work in:
 - Python 3.9+
 - A Gemini API key for LLM features (only needed for modes 1 and 3)
 - No database, no server setup, no external services besides LLM calls
+
+---
+
+## Recent Maintenance Notes
+
+- Removed a stray `__pycache__/*.pyc` file that had been committed to git despite being covered by `.gitignore`; no source change, just repo hygiene.
+- Cleaned up trailing whitespace in `docubot.py` and `llm_client.py`. No behavior change.
+- Fixed a guardrail inconsistency in `docubot.py`: `has_sufficient_evidence()` accepted a `top_k` parameter (per its docstring, meant to bound how many chunks are considered) but never applied it, so it silently scored the entire chunk pool instead of just the top-k window. It now restricts the evidence check to the top `top_k` scoring chunks before comparing against `min_score`, matching its documented contract and what `retrieve()` actually returns to callers. See `model_card.md` Section 5 for details.

@@ -55,18 +55,18 @@ class DocuBot:
         """
         # Split by double newlines (blank lines)
         paragraphs = text.split("\n\n")
-        
+
         # Filter out empty or very short chunks
         chunks = [p.strip() for p in paragraphs if p.strip() and len(p.strip()) >= min_length]
-        
+
         # If no chunks after filtering, fall back to splitting by single newlines
         if not chunks:
             chunks = [p.strip() for p in text.split("\n") if p.strip() and len(p.strip()) >= min_length]
-        
+
         # If still no chunks, return the whole text as one chunk
         if not chunks:
             chunks = [text.strip()]
-        
+
         return chunks
 
     def build_chunks(self, documents):
@@ -103,7 +103,7 @@ class DocuBot:
         index = {}
 
         # new
-        
+
         for filename, text in documents:
             # Split text into words, lowercase them, and add to index
             tokens = text.lower().split()
@@ -138,20 +138,25 @@ class DocuBot:
         # Convert query to lowercase words
         query_words = query.lower().split()
         text_lower = text.lower()
-        
+
         # Count how many query words appear in the text
         score = 0
         for word in query_words:
             # Count occurrences of the word in the text
             score += text_lower.count(word)
-        
+
         return score
 
     def retrieve(self, query, top_k=3):
         """
-        Retrieve top_k relevant chunks using scoring.
-        Returns a list of (filename, chunk_text) sorted by relevance score.
+        TODO (Phase 1):
+        Use the index and scoring function to select top_k relevant document snippets.
+
+        Return a list of (filename, text) sorted by score descending.
         """
+
+        # new
+
         # Score each chunk using the query
         scored_chunks = []
         for filename, chunk_text in self.chunks:
@@ -159,10 +164,10 @@ class DocuBot:
             # Only include chunks with non-zero score
             if score > 0:
                 scored_chunks.append((score, filename, chunk_text))
-        
+
         # Sort by score in descending order
         scored_chunks.sort(key=lambda x: x[0], reverse=True)
-        
+
         # Return top-k chunks as (filename, text) tuples
         results = [(filename, chunk_text) for score, filename, chunk_text in scored_chunks]
         return results[:top_k]
@@ -170,17 +175,17 @@ class DocuBot:
     def has_sufficient_evidence(self, query, top_k=3, min_score=1):
         """
         Guardrail: Check if retrieved results contain meaningful evidence.
-        
+
         A score below min_score indicates no relevant match at all.
         This prevents answering with completely unrelated context.
-        
+
         Args:
             query: User query string
             top_k: Number of chunks to consider
             min_score: Minimum relevance score required (default=1)
                      A score of 1 means at least one query word matched,
                      indicating some relevance to the question.
-        
+
         Returns:
             (bool, int): (has_sufficient_evidence, top_chunk_score)
         """
@@ -189,18 +194,23 @@ class DocuBot:
             score = self.score_document(query, chunk_text)
             if score > 0:
                 scored_chunks.append((score, filename, chunk_text))
-        
+
         # If no chunks scored, we have no evidence
         if not scored_chunks:
             return False, 0
-        
+
         # Sort by score to get the highest-scoring chunk
         scored_chunks.sort(key=lambda x: x[0], reverse=True)
-        
+
+        # Only consider the top_k chunks, matching what retrieve() returns
+        top_chunks = scored_chunks[:top_k]
+        if not top_chunks:
+            return False, 0
+
         # Check if the highest-scoring chunk meets the threshold
-        top_score = scored_chunks[0][0]
+        top_score = top_chunks[0][0]
         has_evidence = top_score >= min_score
-        
+
         return has_evidence, top_score
 
     # -----------------------------------------------------------
@@ -211,15 +221,15 @@ class DocuBot:
         """
         Phase 1 retrieval only mode.
         Returns raw snippets and filenames with no LLM involved.
-        
+
         Includes guardrail: refuses to answer if no relevant docs found.
         """
         # Check for sufficient evidence before answering
         has_evidence, top_score = self.has_sufficient_evidence(query, top_k=top_k, min_score=min_score)
-        
+
         if not has_evidence:
             return "I don't have relevant information in the documentation to answer this question."
-        
+
         snippets = self.retrieve(query, top_k=top_k)
 
         formatted = []
@@ -233,7 +243,7 @@ class DocuBot:
         Phase 2 RAG mode.
         Uses student retrieval to select snippets, then asks Gemini
         to generate an answer using only those snippets.
-        
+
         Includes guardrail: refuses to answer if no relevant docs found.
         """
         if self.llm_client is None:
@@ -243,7 +253,7 @@ class DocuBot:
 
         # Check for sufficient evidence before asking LLM
         has_evidence, top_score = self.has_sufficient_evidence(query, top_k=top_k, min_score=min_score)
-        
+
         if not has_evidence:
             return "I don't have relevant information in the documentation to answer this question."
 

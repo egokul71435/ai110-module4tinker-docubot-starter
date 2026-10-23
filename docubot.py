@@ -9,6 +9,32 @@ Core DocuBot class responsible for:
 
 import os
 import glob
+import re
+
+STOP_WORDS = {
+    "a", "an", "the", "is", "are", "was", "were", "be", "do", "does", "did",
+    "i", "we", "you", "it", "of", "to", "in", "on", "for", "and", "or",
+    "how", "what", "where", "which", "when", "why", "there", "any", "this", "that",
+}
+
+
+def stem(token):
+    """Very light suffix stripping so 'generated' matches 'generate'."""
+    for suffix in ("ing", "ed", "es", "e", "s"):
+        if token.endswith(suffix) and len(token) - len(suffix) >= 4:
+            return token[: -len(suffix)]
+    return token
+
+
+def tokenize(text):
+    """Lowercase, split on non-alphanumerics (so snake_case splits), and stem."""
+    return [stem(t) for t in re.findall(r"[a-z0-9]+", text.lower())]
+
+
+def query_terms(query):
+    """Tokenize a query and drop stop words."""
+    return [t for t in tokenize(query) if t not in STOP_WORDS]
+
 
 class DocuBot:
     def __init__(self, docs_folder="docs", llm_client=None):
@@ -87,7 +113,6 @@ class DocuBot:
 
     def build_index(self, documents):
         """
-        TODO (Phase 1):
         Build a tiny inverted index mapping lowercase words to the documents
         they appear in.
 
@@ -102,20 +127,12 @@ class DocuBot:
         """
         index = {}
 
-        # new
-
         for filename, text in documents:
             # Split text into words, lowercase them, and add to index
-            tokens = text.lower().split()
-            for token in tokens:
-                # Remove common punctuation from the end of tokens
-                token = token.rstrip('.,!?;:')
-                if token:  # Skip empty tokens
-                    if token not in index:
-                        index[token] = []
-                    # Add filename if not already in the list
-                    if filename not in index[token]:
-                        index[token].append(filename)
+            for token in tokenize(text):
+                files = index.setdefault(token, [])
+                if filename not in files:
+                    files.append(filename)
         return index
 
     # -----------------------------------------------------------
@@ -124,7 +141,6 @@ class DocuBot:
 
     def score_document(self, query, text):
         """
-        TODO (Phase 1):
         Return a simple relevance score for how well the text matches the query.
 
         Suggested baseline:
@@ -133,33 +149,32 @@ class DocuBot:
         - Return the count as the score
         """
 
-        # new
+        # Count whole-word matches of each (non-stop-word) query term
+        counts = {}
+        for token in tokenize(text):
+            counts[token] = counts.get(token, 0) + 1
 
-        # Convert query to lowercase words
-        query_words = query.lower().split()
-        text_lower = text.lower()
-
-        # Count how many query words appear in the text
-        score = 0
-        for word in query_words:
-            # Count occurrences of the word in the text
-            score += text_lower.count(word)
+        score = sum(counts.get(word, 0) for word in query_terms(query))
 
         return score
 
     def retrieve(self, query, top_k=3):
         """
-        TODO (Phase 1):
         Use the index and scoring function to select top_k relevant document snippets.
 
         Return a list of (filename, text) sorted by score descending.
         """
 
-        # new
-
         # Score each chunk using the query
+        # Only consider files the index says contain at least one query term
+        candidate_files = set()
+        for term in query_terms(query):
+            candidate_files.update(self.index.get(term, []))
+
         scored_chunks = []
         for filename, chunk_text in self.chunks:
+            if filename not in candidate_files:
+                continue
             score = self.score_document(query, chunk_text)
             # Only include chunks with non-zero score
             if score > 0:

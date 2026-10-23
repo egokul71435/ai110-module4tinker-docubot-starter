@@ -83,8 +83,21 @@ You will primarily work in:
 
 ---
 
+## Testing
+
+There is no unit test suite. Use these checks instead:
+
+    python evaluation.py          # retrieval hit rates on sample queries (no API key needed)
+    python main.py                # interactive; choose mode 2 for retrieval-only
+    python generate_answers.py    # regenerates answers.json (needs GEMINI_API_KEY)
+
+Retrieval hit rate in `evaluation.py` is 0.75 (was 0.62) after tokenization, light stemming and stop-word filtering in `docubot.py`; a few sample queries still miss. See `model_card.md` for analysis.
+
+---
+
 ## Recent Maintenance Notes
 
-- Removed a stray `__pycache__/*.pyc` file that had been committed to git despite being covered by `.gitignore`; no source change, just repo hygiene.
-- Cleaned up trailing whitespace in `docubot.py` and `llm_client.py`. No behavior change.
-- Fixed a guardrail inconsistency in `docubot.py`: `has_sufficient_evidence()` accepted a `top_k` parameter (per its docstring, meant to bound how many chunks are considered) but never applied it, so it silently scored the entire chunk pool instead of just the top-k window. It now restricts the evidence check to the top `top_k` scoring chunks before comparing against `min_score`, matching its documented contract and what `retrieve()` actually returns to callers. See `model_card.md` Section 5 for details.
+- Added `.env.example` (the setup steps referenced it but it was missing).
+- Removed stale `# new` markers and outdated `TODO` labels from `docubot.py`; no behavior change.
+- `has_sufficient_evidence()` now slices to the top `top_k` chunks, matching `retrieve()`. The result is unchanged because the best score is always in the top window. See `model_card.md` Section 5.
+- Improved retrieval in `docubot.py`: whole-word matching, punctuation/snake_case splitting, light stemming, stop words, and `retrieve()` now uses the index to pick candidate files.
